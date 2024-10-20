@@ -1,9 +1,10 @@
 const express = require('express');
 const i2c = require('i2c-bus');
 const cors = require('cors');
+const SerialPort = require('serialport'); // Usamos 'serialport' en lugar de 'pms5003-sensor'
+const Readline = require('@serialport/parser-readline');
 
 const SHTC3_I2C_ADDRESS = 0x70;
-
 const SHTC3_WakeUp = 0x3517;
 const SHTC3_Sleep = 0xB098;
 const SHTC3_Software_RES = 0x805D;
@@ -13,7 +14,7 @@ const SHTC3_NM_CD_ReadRH = 0x58E0;
 const app = express();
 const port = 3000;
 
-app.use(cors()); // Habilita CORS para todas las rutas
+app.use(cors());
 
 const i2cBus = i2c.openSync(1); // Cambia 1 por el bus correcto si es necesario
 
@@ -90,6 +91,37 @@ class SHTC3 {
     }
 }
 
+// Inicializa el puerto serial para PMS5003
+const portPMS5003 = new SerialPort('/dev/serial0', {
+  baudRate: 9600,
+});
+
+const parser = portPMS5003.pipe(new Readline({ delimiter: '\n' }));
+
+let pm25 = 0;
+let pm10 = 0;
+
+// Lee datos del PMS5003
+parser.on('data', (data) => {
+    const buffer = Buffer.from(data, 'hex');
+
+    if (buffer.length >= 32 && buffer[0] === 0x42 && buffer[1] === 0x4D) {
+        pm25 = buffer.readUInt16BE(12); // PM2.5 en µg/m³
+        pm10 = buffer.readUInt16BE(14); // PM10 en µg/m³
+        console.log(`Lectura del PMS5003 -> PM2.5: ${pm25} µg/m³, PM10: ${pm10} µg/m³`);
+    } else {
+        console.log('Datos recibidos no válidos del PMS5003:', data);
+    }
+});
+
+portPMS5003.on('open', () => {
+    console.log('Puerto serial abierto para PMS5003');
+});
+
+portPMS5003.on('error', (err) => {
+    console.log('Error en el puerto serial del PMS5003:', err.message);
+});
+
 const shtc3 = new SHTC3(i2cBus, SHTC3_I2C_ADDRESS);
 
 app.get('/events', (req, res) => {
@@ -103,14 +135,17 @@ app.get('/events', (req, res) => {
     const sendData = () => {
         const temperature = shtc3.readTemperature();
         const humidity = shtc3.readHumidity();
-        const data = {
+
+        const responseData = {
             temperature: temperature.toFixed(2),
             humidity: humidity.toFixed(2),
+            pm25: pm25.toFixed(2),
+            pm10: pm10.toFixed(2),
             timestamp: new Date().toISOString()
         };
 
-        res.write(`data: ${JSON.stringify(data)}\n\n`);
-        console.log('Enviando datos del sensor:', data);
+        res.write(`data: ${JSON.stringify(responseData)}\n\n`);
+        console.log('Enviando datos del sensor:', responseData);
 
         // Ajustar el tiempo de intervalo basado en la temperatura
         if (temperature >= 50) {
