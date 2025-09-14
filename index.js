@@ -1,21 +1,21 @@
 const express = require("express");
 const i2c = require("i2c-bus");
 const cors = require("cors");
+const { SerialPort } = require("serialport");
+const http = require("http");
 
 const SHTC3_I2C_ADDRESS = 0x70;
-
 const SHTC3_WakeUp = 0x3517;
-const SHTC3_Sleep = 0xb098;
 const SHTC3_Software_RES = 0x805d;
 const SHTC3_NM_CD_ReadTH = 0x7866;
 const SHTC3_NM_CD_ReadRH = 0x58e0;
 
 const app = express();
-const port = 3000;
+const port = 3001;
+app.use(cors());
+const server = http.createServer(app);
 
-app.use(cors()); // Habilita CORS para todas las rutas
-
-const i2cBus = i2c.openSync(1); // Cambia 1 por el bus correcto si es necesario
+const i2cBus = i2c.openSync(1); 
 
 class SHTC3 {
   constructor(bus, address) {
@@ -23,27 +23,22 @@ class SHTC3 {
     this.address = address;
     this.reset();
   }
-
   writeCommand(cmd) {
     const buffer = Buffer.from([(cmd >> 8) & 0xff, cmd & 0xff]);
     this.bus.i2cWriteSync(this.address, buffer.length, buffer);
   }
-
   reset() {
     this.writeCommand(SHTC3_Software_RES);
     this.sleep(10);
   }
-
   wakeUp() {
     this.writeCommand(SHTC3_WakeUp);
     this.sleep(10);
   }
-
   sleep(ms) {
     const end = Date.now() + ms;
     while (Date.now() < end) {}
   }
-
   readTemperature() {
     this.wakeUp();
     this.writeCommand(SHTC3_NM_CD_ReadTH);
@@ -51,14 +46,10 @@ class SHTC3 {
     const buf = Buffer.alloc(3);
     this.bus.i2cReadSync(this.address, 3, buf);
     if (this.checkCrc(buf, 2, buf[2])) {
-      const temperature = (((buf[0] << 8) | buf[1]) * 175) / 65536 - 45.0;
-      console.log(`Temperatura leída: ${temperature.toFixed(2)}°C`);
-      return temperature;
+      return (((buf[0] << 8) | buf[1]) * 175) / 65536 - 45.0;
     }
-    console.log("Error al leer la temperatura");
-    return 0;
+    throw new Error("CRC inválido en temperatura");
   }
-
   readHumidity() {
     this.wakeUp();
     this.writeCommand(SHTC3_NM_CD_ReadRH);
@@ -66,80 +57,105 @@ class SHTC3 {
     const buf = Buffer.alloc(3);
     this.bus.i2cReadSync(this.address, 3, buf);
     if (this.checkCrc(buf, 2, buf[2])) {
-      const humidity = (100 * ((buf[0] << 8) | buf[1])) / 65536;
-      console.log(`Humedad leída: ${humidity.toFixed(2)}%`);
-      return humidity;
+      return (100 * ((buf[0] << 8) | buf[1])) / 65536;
     }
-    console.log("Error al leer la humedad");
-    return 0;
+    throw new Error("CRC inválido en humedad");
   }
-
   checkCrc(data, len, checksum) {
     let crc = 0xff;
     for (let i = 0; i < len; i++) {
       crc ^= data[i];
       for (let bit = 0; bit < 8; bit++) {
-        if (crc & 0x80) {
-          crc = (crc << 1) ^ 0x0131;
-        } else {
-          crc <<= 1;
-        }
+        crc = (crc & 0x80) ? ((crc << 1) ^ 0x131) : (crc << 1);
+        crc &= 0xff;
       }
     }
     return crc === checksum;
   }
 }
-
 const shtc3 = new SHTC3(i2cBus, SHTC3_I2C_ADDRESS);
 
-app.get("/events", (req, res) => {
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
-
-  let intervalTime = 10000; // Intervalo inicial en milisegundos
-  let intervalId;
-
-  const sendData = () => {
-    const temperature = shtc3.readTemperature();
-    const humidity = shtc3.readHumidity();
-    const data = {
-      temperature: temperature.toFixed(2),
-      humidity: humidity.toFixed(2),
-      timestamp: new Date().toISOString(),
-    };
-
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-    console.log("Enviando datos del sensor:", data);
-
-    // Ajustar el tiempo de intervalo basado en la temperatura
-    if (temperature >= 50) {
-      if (intervalTime !== 3000) {
-        // Cambia solo si el intervalo actual es diferente
-        clearInterval(intervalId);
-        intervalTime = 3000;
-        intervalId = setInterval(sendData, intervalTime);
-        console.log("Intervalo ajustado a 3000 ms");
-      }
-    } else {
-      if (intervalTime !== 10000) {
-        // Cambia solo si el intervalo actual es diferente
-        clearInterval(intervalId);
-        intervalTime = 10000;
-        intervalId = setInterval(sendData, intervalTime);
-        console.log("Intervalo ajustado a 10000 ms");
-      }
-    }
-  };
-
-  intervalId = setInterval(sendData, intervalTime);
-
-  req.on("close", () => {
-    clearInterval(intervalId);
-    console.log("Conexión cerrada, deteniendo la transmisión.");
-  });
+const pms5003Port = new SerialPort({
+  path: "/dev/serial0", 
+  baudRate: 9600,
+  dataBits: 8,
+  parity: "none",
+  stopBits: 1
 });
 
-app.listen(port, "0.0.0.0", () => {
+let pmsBuffer = Buffer.alloc(0);
+
+pms5003Port.on("data", (chunk) => {
+  pmsBuffer = Buffer.concat([pmsBuffer, chunk]);
+  if (pmsBuffer.length > 256) {
+    pmsBuffer = pmsBuffer.slice(-64);
+  }
+});
+
+pms5003Port.on("error", (err) => {
+  console.error("Error PMS5003:", err.message);
+});
+
+function readPMS5003() {
+  const idx = pmsBuffer.indexOf(Buffer.from([0x42, 0x4d]));
+  if (idx !== -1 && pmsBuffer.length >= idx + 32) {
+    const frame = pmsBuffer.slice(idx, idx + 32);
+    const pm2_5 = frame.readUInt16BE(10);
+    const pm10 = frame.readUInt16BE(12);
+    return { pm2_5, pm10 };
+  }
+  throw new Error("No hay frame válido del PMS5003 aún");
+}
+
+let lastData = null;
+
+function readAllNow() {
+  const temperature = shtc3.readTemperature();
+  const humidity = shtc3.readHumidity();
+  const { pm2_5, pm10 } = readPMS5003();
+
+  const data = {
+    temperature: Number(temperature.toFixed(2)),
+    humidity: Number(humidity.toFixed(2)),
+    pm2_5: Number(pm2_5.toFixed(2)),
+    pm10: Number(pm10.toFixed(2)),
+    timestamp: new Date().toISOString()
+  };
+  lastData = data;
+  return data;
+}
+
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, service: "sensors-api", time: new Date().toISOString() });
+});
+
+app.get("/latest", (_req, res) => {
+  if (!lastData) {
+    return res.status(503).json({ error: "Sin datos aún. Usa /read para forzar una lectura." });
+  }
+  res.json(lastData);
+});
+
+app.get("/read", (_req, res) => {
+  try {
+    const data = readAllNow();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+const POLL_MS = 5000;
+setInterval(() => {
+  try {
+    readAllNow();
+  } catch (e) {
+  }
+}, POLL_MS);
+
+server.listen(port, "0.0.0.0", () => {
   console.log(`Servidor corriendo en http://localhost:${port}`);
+  console.log(`GET /health  -> OK`);
+  console.log(`GET /read    -> Lee ambos sensores ahora`);
+  console.log(`GET /latest  -> Último dato cacheado`);
 });
