@@ -1,22 +1,41 @@
+// server.js
+// API de sensores para Raspberry Pi (SHTC3 por I2C + PMS5003 por Serial)
+// Escucha en 0.0.0.0 y no se cae si un sensor falla al iniciar.
+
 const express = require("express");
 const i2c = require("i2c-bus");
 const cors = require("cors");
 const { SerialPort } = require("serialport");
 const http = require("http");
+const os = require("os");
 
+// ---------- Constantes SHTC3 ----------
 const SHTC3_I2C_ADDRESS = 0x70;
 const SHTC3_WakeUp = 0x3517;
 const SHTC3_Software_RES = 0x805d;
 const SHTC3_NM_CD_ReadTH = 0x7866;
 const SHTC3_NM_CD_ReadRH = 0x58e0;
 
+// ---------- App/HTTP ----------
 const app = express();
 const port = 3001;
 app.use(cors());
 const server = http.createServer(app);
 
-const i2cBus = i2c.openSync(1); 
+// ---------- Estado global ----------
+let i2cBus = null;
+let shtc3 = null;
+let pms5003Port = null;
+let pmsBuffer = Buffer.alloc(0);
+let lastData = null;
 
+// ---------- Utilidades ----------
+function listIPv4() {
+  const nets = Object.values(os.networkInterfaces()).flat();
+  return nets.filter(n => !n.internal && (n.family === "IPv4" || n.family === 4)).map(n => n.address);
+}
+
+// ---------- Clase SHTC3 ----------
 class SHTC3 {
   constructor(bus, address) {
     this.bus = bus;
@@ -73,31 +92,23 @@ class SHTC3 {
     return crc === checksum;
   }
 }
-const shtc3 = new SHTC3(i2cBus, SHTC3_I2C_ADDRESS);
 
-const pms5003Port = new SerialPort({
-  path: "/dev/serial0", 
-  baudRate: 9600,
-  dataBits: 8,
-  parity: "none",
-  stopBits: 1
-});
-
-let pmsBuffer = Buffer.alloc(0);
-
-pms5003Port.on("data", (chunk) => {
-  pmsBuffer = Buffer.concat([pmsBuffer, chunk]);
-  if (pmsBuffer.length > 256) {
-    pmsBuffer = pmsBuffer.slice(-64);
-  }
-});
-
-pms5003Port.on("error", (err) => {
-  console.error("Error PMS5003:", err.message);
-});
+// ---------- Lectura PMS5003 ----------
+function attachPMSListeners() {
+  if (!pms5003Port) return;
+  pms5003Port.on("data", (chunk) => {
+    pmsBuffer = Buffer.concat([pmsBuffer, chunk]);
+    if (pmsBuffer.length > 256) {
+      pmsBuffer = pmsBuffer.slice(-64);
+    }
+  });
+  pms5003Port.on("error", (err) => {
+    console.error("Error PMS5003:", err.message);
+  });
+}
 
 function readPMS5003() {
-  const idx = pmsBuffer.indexOf(Buffer.from([0x42, 0x4d]));
+  const idx = pmsBuffer.indexOf(Buffer.from([0x42, 0x4d])); // Header 'BM'
   if (idx !== -1 && pmsBuffer.length >= idx + 32) {
     const frame = pmsBuffer.slice(idx, idx + 32);
     const pm2_5 = frame.readUInt16BE(10);
@@ -107,9 +118,11 @@ function readPMS5003() {
   throw new Error("No hay frame válido del PMS5003 aún");
 }
 
-let lastData = null;
-
+// ---------- Lógica de lectura combinada ----------
 function readAllNow() {
+  if (!shtc3) throw new Error("I2C/SHTC3 no inicializado");
+  if (!pms5003Port) throw new Error("Serial PMS5003 no inicializado");
+
   const temperature = shtc3.readTemperature();
   const humidity = shtc3.readHumidity();
   const { pm2_5, pm10 } = readPMS5003();
@@ -125,8 +138,16 @@ function readAllNow() {
   return data;
 }
 
+// ---------- Rutas ----------
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, service: "sensors-api", time: new Date().toISOString() });
+  res.json({
+    ok: true,
+    service: "sensors-api",
+    time: new Date().toISOString(),
+    i2cReady: Boolean(shtc3),
+    serialReady: Boolean(pms5003Port),
+    lastSample: lastData?.timestamp || null
+  });
 });
 
 app.get("/latest", (_req, res) => {
@@ -145,17 +166,65 @@ app.get("/read", (_req, res) => {
   }
 });
 
-const POLL_MS = 5000;
-setInterval(() => {
-  try {
-    readAllNow();
-  } catch (e) {
-  }
-}, POLL_MS);
-
+// ---------- Arranque del server primero ----------
 server.listen(port, "0.0.0.0", () => {
-  console.log(`Servidor corriendo en http://localhost:${port}`);
-  console.log(`GET /health  -> OK`);
-  console.log(`GET /read    -> Lee ambos sensores ahora`);
-  console.log(`GET /latest  -> Último dato cacheado`);
+  console.log(`Servidor HTTP arriba en puerto ${port}`);
+  const ips = listIPv4();
+  if (ips.length) {
+    for (const ip of ips) {
+      console.log(`→ Probar: http://${ip}:${port}/health`);
+      console.log(`→ Probar: http://${ip}:${port}/read`);
+      console.log(`→ Probar: http://${ip}:${port}/latest`);
+    }
+  } else {
+    console.log(`→ También: http://localhost:${port}/health`);
+  }
+  console.log("Inicializando hardware…");
+  initHardware();
+});
+
+// ---------- Inicialización de hardware (no tumba el server) ----------
+function initHardware() {
+  // I2C/SHTC3
+  try {
+    i2cBus = i2c.openSync(1);
+    shtc3 = new SHTC3(i2cBus, SHTC3_I2C_ADDRESS);
+    console.log("I2C/SHTC3 OK");
+  } catch (e) {
+    console.error("I2C init failed:", e.message);
+  }
+
+  // Serial PMS5003
+  try {
+    pms5003Port = new SerialPort({
+      path: "/dev/serial0",
+      baudRate: 9600,
+      dataBits: 8,
+      parity: "none",
+      stopBits: 1
+    });
+    attachPMSListeners();
+    console.log("Serial PMS5003 OK");
+  } catch (e) {
+    console.error("Serial init failed:", e.message);
+  }
+
+  // Polling periódico (si hay sensores, intentará leer; si no, ignora el error)
+  const POLL_MS = 5000;
+  setInterval(() => {
+    try {
+      readAllNow();
+    } catch (e) {
+      // Silencioso para no llenar logs; descomenta si quieres ver los errores:
+      // console.warn("Poll read error:", e.message);
+    }
+  }, POLL_MS);
+}
+
+// ---------- Manejo básico de errores de proceso ----------
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("unhandledRejection:", reason);
 });
