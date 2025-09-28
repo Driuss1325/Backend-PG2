@@ -1,5 +1,4 @@
 require('dotenv').config();
-const fs = require('fs');
 
 function buildConfig() {
   const cfg = {
@@ -10,18 +9,20 @@ function buildConfig() {
     port: Number(process.env.MYSQL_PORT || 3306),
     dialect: 'mysql',
     dialectOptions: {},
-    define: { underscored: true }
+    define: { underscored: true },
+    logging: false
   };
 
-  const sslMode = (process.env.MYSQL_SSL || '').toLowerCase();
+  const sslMode = String(process.env.MYSQL_SSL || '').toLowerCase(); // REQUIRED/true/1
   if (sslMode === 'required' || sslMode === 'true' || sslMode === '1') {
-    const caPath = process.env.MYSQL_CA_PATH;
-    cfg.dialectOptions.ssl = {
-      // Aiven requiere TLS; con CA validamos el servidor.
-      rejectUnauthorized: true,
-    };
-    if (caPath) {
-      cfg.dialectOptions.ssl.ca = fs.readFileSync(caPath, 'utf8');
+    const b64 = process.env.MYSQL_CA_BASE64;
+    if (b64) {
+      cfg.dialectOptions.ssl = {
+        rejectUnauthorized: true,
+        ca: Buffer.from(b64, 'base64').toString('utf8')
+      };
+    } else {
+      cfg.dialectOptions.ssl = { rejectUnauthorized: true };
     }
   }
 
@@ -29,8 +30,4 @@ function buildConfig() {
 }
 
 const base = buildConfig();
-
-module.exports = {
-  development: base,
-  production: base
-};
+module.exports = { development: base, production: base };

@@ -4,8 +4,9 @@ const cors = require('cors');
 const morgan = require('morgan');
 
 const swaggerUi = require('swagger-ui-express');
-const openapiSpec = require('./docs/openapi');
+const openapiSpec = require('./docs/openapi'); // si ya lo tienes
 
+// Rutas
 const authRoutes = require('./routes/auth.routes');
 const devicesRoutes = require('./routes/devices.routes');
 const readingsRoutes = require('./routes/readings.routes');
@@ -18,7 +19,7 @@ app.use(cors({ origin: process.env.CORS_ORIGIN || '*', credentials: true }));
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Swagger UI + JSON
+// Swagger
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(openapiSpec, { explorer: true }));
 app.get('/api/docs.json', (_req, res) => res.json(openapiSpec));
 
@@ -27,14 +28,14 @@ app.get('/api/health', (_req, res) =>
   res.json({ ok: true, service: 'fireguard-api', now: new Date().toISOString() })
 );
 
-// Rutas
+// APIs
 app.use('/api/auth', authRoutes);
 app.use('/api/devices', devicesRoutes);
-app.use('/api/readings', readingsRoutes);
+app.use('/api/readings', readingsRoutes); // ← recibe lecturas desde tus Raspberry
 app.use('/api/reports', reportsRoutes);
 app.use('/api/enroll', enrollRoutes);
 
-// Error handler
+// Errores
 app.use(errorMiddleware);
 
 module.exports = app;
