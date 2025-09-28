@@ -1,23 +1,28 @@
 'use strict';
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const Sequelize = require('sequelize');
+const { Sequelize } = require('sequelize');
+
 const env = process.env.NODE_ENV || 'development';
-const config = require('../config/config.js')[env];
+const config = require('../config/config')[env];   // 👈 toma el config con dialect
+
+const sequelize = new Sequelize(
+  config.database,
+  config.username,
+  config.password,
+  config
+);
 
 const db = {};
-const sequelize = new Sequelize(config.database, config.username, config.password, config);
-
 fs.readdirSync(__dirname)
-  .filter(file => file !== 'index.js' && file.endsWith('.js'))
-  .forEach(file => {
+  .filter((f) => f !== 'index.js' && f.endsWith('.js'))
+  .forEach((file) => {
     const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);
     db[model.name] = model;
   });
 
-Object.keys(db).forEach(name => {
-  if (db[name].associate) db[name].associate(db);
-});
+Object.keys(db).forEach((name) => db[name].associate && db[name].associate(db));
 
 db.sequelize = sequelize;
 db.Sequelize = Sequelize;

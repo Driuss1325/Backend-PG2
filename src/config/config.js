@@ -1,3 +1,4 @@
+// src/config/config.js
 require('dotenv').config();
 
 function buildConfig() {
@@ -8,26 +9,21 @@ function buildConfig() {
     host: process.env.MYSQL_HOST,
     port: Number(process.env.MYSQL_PORT || 3306),
     dialect: 'mysql',
-    dialectOptions: {},
+    logging: false,
     define: { underscored: true },
-    logging: false
+    dialectOptions: {}
   };
 
-  const sslMode = String(process.env.MYSQL_SSL || '').toLowerCase(); // REQUIRED/true/1
+  const sslMode = String(process.env.MYSQL_SSL || '').toLowerCase();
   if (sslMode === 'required' || sslMode === 'true' || sslMode === '1') {
     const b64 = process.env.MYSQL_CA_BASE64;
-    if (b64) {
-      cfg.dialectOptions.ssl = {
-        rejectUnauthorized: true,
-        ca: Buffer.from(b64, 'base64').toString('utf8')
-      };
-    } else {
-      cfg.dialectOptions.ssl = { rejectUnauthorized: true };
-    }
+    cfg.dialectOptions.ssl = b64
+      ? { rejectUnauthorized: true, ca: Buffer.from(b64, 'base64').toString('utf8') }
+      : { rejectUnauthorized: true };
   }
 
   return cfg;
 }
 
 const base = buildConfig();
-module.exports = { development: base, production: base };
+module.exports = { development: base, test: base, production: base };
