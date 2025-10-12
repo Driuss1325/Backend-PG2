@@ -1,7 +1,10 @@
-const { streamReadingsPDF } = require('../services/report.service');
-
-exports.readingsPdf = async (req, res) => {
-  const { deviceId, from, to, limit } = req.query || {};
-  if (!deviceId) return res.status(400).json({ error: 'deviceId requerido' });
-  await streamReadingsPDF({ deviceId, from, to, limit }, res);
-};
+import { buildReportPDF } from "../services/report.service.js";
+export async function downloadReport(req, res) {
+  const { deviceId, dateFrom, dateTo } = req.query;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `inline; filename=report_device_${deviceId}.pdf`
+  );
+  await buildReportPDF(res, { deviceId, dateFrom, dateTo });
+}

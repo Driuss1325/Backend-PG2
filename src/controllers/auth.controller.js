@@ -1,9 +1,17 @@
-const { login } = require('../services/auth.service');
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
+import { User } from "../models/index.js";
 
-exports.login = async (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'email y password requeridos' });
-  const result = await login(email, password);
-  if (!result) return res.status(401).json({ error: 'Credenciales inválidas' });
-  res.json(result);
-};
+export async function login(req, res) {
+  const { email, password } = req.body;
+  const user = await User.findOne({ where: { email } });
+  if (!user) return res.status(401).json({ error: "Credenciales inválidas" });
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Credenciales inválidas" });
+  const token = jwt.sign(
+    { id: user.id, role: user.role, name: user.name },
+    process.env.JWT_SECRET,
+    { expiresIn: "8h" }
+  );
+  res.json({ token });
+}

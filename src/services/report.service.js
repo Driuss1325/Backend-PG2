@@ -1,48 +1,33 @@
-const PDFDocument = require('pdfkit');
-const dayjs = require('dayjs');
-const { Device, Reading } = require('../models');
+import PDFDocument from "pdfkit";
+import { Op } from "sequelize";
+import { Reading, Device } from "../models/index.js";
 
-exports.streamReadingsPDF = async ({ deviceId, from, to, limit=200 }, res) => {
+export async function buildReportPDF(res, { deviceId, dateFrom, dateTo }) {
   const device = await Device.findByPk(deviceId);
-  if (!device) return res.status(404).json({ error: 'Device no encontrado' });
+  const where = { deviceId };
+  if (dateFrom || dateTo) where.createdAt = {};
+  if (dateFrom) where.createdAt[Op.gte] = new Date(dateFrom);
+  if (dateTo) where.createdAt[Op.lte] = new Date(dateTo);
 
-  const { Op } = require('sequelize');
-  const where = { device_id: deviceId };
-  const ops = {};
-  if (from) ops[Op.gte] = new Date(from);
-  if (to) ops[Op.lte] = new Date(to);
-  if (Object.keys(ops).length) where.ts = ops;
+  const rows = await Reading.findAll({ where, order: [["createdAt", "ASC"]] });
 
-  const rows = await Reading.findAll({
-    where,
-    order: [['ts','DESC']],
-    limit: Number(limit),
-    attributes: ['temperature','humidity','pm2_5','pm10','lat','lng','ts']
-  });
-
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `attachment; filename="readings-${device.device_uid}.pdf"`);
-
-  const doc = new PDFDocument({ size: 'A4', margin: 36 });
+  const doc = new PDFDocument({ margin: 50 });
   doc.pipe(res);
+  doc.fontSize(18).text("FireGuard Reporte de Lecturas", { align: "center" });
+  doc
+    .moveDown()
+    .fontSize(12)
+    .text(`Dispositivo: ${device?.name || deviceId}`);
+  doc.text(`Rango: ${dateFrom || "-"} a ${dateTo || "-"}`);
+  doc.moveDown();
 
-  doc.fontSize(18).text('Reporte de Lecturas - FireGuard');
-  doc.moveDown(0.3);
-  doc.fontSize(12).text(`Dispositivo: ${device.name} (${device.device_uid})`);
-  doc.text(`Ubicación: ${device.lat ?? '-'}, ${device.lng ?? '-'}`);
-  doc.text(`Generado: ${dayjs().format('YYYY-MM-DD HH:mm:ss')}`);
-  doc.moveDown(0.8);
-
-  doc.fontSize(12).text('Últimas lecturas:', { underline: true });
-  doc.moveDown(0.3);
-  doc.fontSize(10);
-  rows.forEach(r => {
-    const line = `[${dayjs(r.ts).format('YYYY-MM-DD HH:mm:ss')}] `
-      + `T=${r.temperature?.toFixed(2)}°C  H=${r.humidity?.toFixed(2)}%  `
-      + `PM2.5=${r.pm2_5?.toFixed(2)}  PM10=${r.pm10?.toFixed(2)}  `
-      + `(${r.lat ?? device.lat ?? '-'}, ${r.lng ?? device.lng ?? '-'})`;
-    doc.text(line);
+  rows.forEach((r) => {
+    doc.text(
+      `${r.createdAt.toISOString()} | T=${r.temperature ?? "-"}°C | H=${
+        r.humidity ?? "-"
+      }% | PM2.5=${r.pm25 ?? "-"} | PM10=${r.pm10 ?? "-"}`
+    );
   });
 
   doc.end();
-};
+}

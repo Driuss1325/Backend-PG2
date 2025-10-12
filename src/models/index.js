@@ -1,29 +1,45 @@
-'use strict';
-require('dotenv').config();
-const fs = require('fs');
-const path = require('path');
-const { Sequelize } = require('sequelize');
+import { sequelize } from "../config/db.js";
+import User from "./User.js";
+import Device from "./Device.js";
+import DeviceLocationLog from "./DeviceLocationLog.js";
+import ApiKey from "./ApiKey.js";
+import Reading from "./Reading.js";
+import Alert from "./Alert.js";
+import UserLog from "./UserLog.js";
+import DeviceLog from "./DeviceLog.js";
+import CommunityPost from "./CommunityPost.js";
 
-const env = process.env.NODE_ENV || 'development';
-const config = require('../config/config')[env];   // 👈 toma el config con dialect
+// Relaciones
+User.hasMany(Device, { foreignKey: "ownerId" });
+Device.belongsTo(User, { as: "owner", foreignKey: "ownerId" });
 
-const sequelize = new Sequelize(
-  config.database,
-  config.username,
-  config.password,
-  config
-);
+Device.hasMany(Reading, { foreignKey: "deviceId" });
+Reading.belongsTo(Device, { foreignKey: "deviceId" });
 
-const db = {};
-fs.readdirSync(__dirname)
-  .filter((f) => f !== 'index.js' && f.endsWith('.js'))
-  .forEach((file) => {
-    const model = require(path.join(__dirname, file))(sequelize, Sequelize.DataTypes);
-    db[model.name] = model;
-  });
+Device.hasMany(Alert, { foreignKey: "deviceId" });
+Alert.belongsTo(Device, { foreignKey: "deviceId" });
 
-Object.keys(db).forEach((name) => db[name].associate && db[name].associate(db));
+Device.hasOne(ApiKey, { foreignKey: "deviceId" });
+ApiKey.belongsTo(Device, { foreignKey: "deviceId" });
 
-db.sequelize = sequelize;
-db.Sequelize = Sequelize;
-module.exports = db;
+User.hasMany(UserLog, { foreignKey: "userId" });
+UserLog.belongsTo(User, { foreignKey: "userId" });
+
+Device.hasMany(DeviceLog, { foreignKey: "deviceId" });
+DeviceLog.belongsTo(Device, { foreignKey: "deviceId" });
+
+Device.hasMany(DeviceLocationLog, { foreignKey: "deviceId" });
+DeviceLocationLog.belongsTo(Device, { foreignKey: "deviceId" });
+
+export {
+  sequelize,
+  User,
+  Device,
+  DeviceLocationLog,
+  ApiKey,
+  Reading,
+  Alert,
+  UserLog,
+  DeviceLog,
+  CommunityPost,
+};

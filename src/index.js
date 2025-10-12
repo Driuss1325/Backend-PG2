@@ -1,22 +1,20 @@
-// src/index.js
-require('dotenv').config();
-const http = require('http');
-const app = require('./app');
+import 'dotenv/config'; // <-- AÑADE ESTO
+import http from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import app from './app.js';
+import { connectDB } from './config/db.js';
+import { initSocket } from './services/socket.service.js';
+import { registerMonitorNamespace } from './sockets/monitor.socket.js';
 
-const HOST = process.env.HOST || '0.0.0.0';
-const PORT = parseInt(process.env.PORT, 10) || 3001;
+const PORT = process.env.PORT || 3000;
 
-const server = http.createServer(app);
+async function bootstrap() {
+  await connectDB();
+  const server = http.createServer(app);
+  const io = new SocketIOServer(server, { cors: { origin: '*' } });
+  initSocket(io);
+  registerMonitorNamespace(io);
+  server.listen(PORT, () => console.log(`API ready on :${PORT}`));
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`API escuchando en http://${HOST}:${PORT}`);
-});
-
-server.on('error', (err) => {
-  console.error('HTTP server error:', err);
-  process.exit(1);
-});
-
-// cierre limpio (opcional)
-process.on('SIGINT', () => { server.close(() => process.exit(0)); });
-process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
+bootstrap().catch(err => { console.error('Failed to start:', err); process.exit(1); });
