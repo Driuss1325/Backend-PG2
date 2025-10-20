@@ -12,10 +12,33 @@ const RUN_MIGRATIONS_ON_BOOT = String(process.env.DB_MIGRATE_ON_BOOT || 'false')
 
 async function runMigrations() {
   if (!RUN_MIGRATIONS_ON_BOOT) return;
+
   await new Promise((resolve, reject) => {
-    const cmd = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-    const p = spawn(cmd, ['sequelize-cli', 'db:migrate'], { stdio: 'inherit' });
-    p.on('exit', code => code === 0 ? resolve() : reject(new Error(`db:migrate exited with ${code}`)));
+    const isWin = process.platform === 'win32';
+
+    // En Windows, usa npx.cmd; agrega cwd y error handler.
+    const cmd  = isWin ? 'npx.cmd' : 'npx';
+    const args = ['sequelize-cli', 'db:migrate'];
+
+    // Si tu proyecto está en otra carpeta distinta, ponla aquí:
+    const cwd = process.cwd();
+
+    const p = spawn(cmd, args, {
+      stdio: 'inherit',
+      cwd,                 // <- importante
+      shell: false         // con npx NO suele requerirse shell:true
+    });
+
+    p.on('error', (err) => {
+      // Esto captura EINVAL con más detalle
+      console.error('[migrate:error]', err);
+      reject(err);
+    });
+
+    p.on('exit', (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`db:migrate exited with code ${code}`));
+    });
   });
 }
 
