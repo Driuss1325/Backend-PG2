@@ -13,6 +13,10 @@ Alert.init(
       type: DataTypes.ENUM("info", "warning", "critical"),
       defaultValue: "info",
     },
+    // NUEVOS: ack/mute
+    acknowledged: { type: DataTypes.BOOLEAN, defaultValue: false },
+    acknowledgedAt: { type: DataTypes.DATE, allowNull: true },
+    mutedUntil: { type: DataTypes.DATE, allowNull: true },
   },
   { sequelize, modelName: "Alert", timestamps: true }
 );

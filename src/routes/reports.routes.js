@@ -1,39 +1,32 @@
-import { Router } from 'express';
-import { authJwt } from '../middleware/authJwt.js';
-import { downloadReport } from '../controllers/reports.controller.js';
+// src/routes/reports.routes.js
+import { Router } from "express";
+import { authJwt } from "../middleware/authJwt.js";
+import { downloadReportXlsx } from "../controllers/reports.controller.js";
 
 const r = Router();
 
 /**
  * @openapi
- * /api/reports/pdf:
+ * /api/reports/xlsx:
  *   get:
- *     summary: Descargar reporte PDF de lecturas
+ *     summary: Descargar reporte de lecturas en Excel
  *     tags: [Reports]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: deviceId
+ *         schema: { type: integer }
  *         required: true
- *         schema:
- *           type: integer
  *       - in: query
- *         name: dateFrom
- *         required: false
- *         schema:
- *           type: string
- *           format: date
+ *         name: from
+ *         schema: { type: string, format: date-time }
  *       - in: query
- *         name: dateTo
- *         required: false
- *         schema:
- *           type: string
- *           format: date
+ *         name: to
+ *         schema: { type: string, format: date-time }
  *     responses:
- *       200:
- *         description: PDF
+ *       200: { description: XLSX }
  */
-r.get('/pdf', authJwt, downloadReport);
+r.get("/xlsx", authJwt, downloadReportXlsx);
 
 export default r;
