@@ -30,7 +30,7 @@ const r = Router();
  *           format: date-time
  *         description: ISO 8601. Incluir lecturas desde esta fecha/hora (>=).
  *       - in: query
- *         name: to
+ *         name: until
  *         schema:
  *           type: string
  *           format: date-time
@@ -48,20 +48,18 @@ const r = Router();
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:         { type: integer }
- *                       deviceId:   { type: integer }
- *                       temperature:{ type: number }
- *                       humidity:   { type: number }
- *                       pm25:       { type: number }
- *                       pm10:       { type: number }
- *                       createdAt:  { type: string, format: date-time }
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:          { type: integer }
+ *                   deviceId:    { type: integer }
+ *                   temperature: { type: number, nullable: true }
+ *                   humidity:    { type: number, nullable: true }
+ *                   pm25:        { type: number, nullable: true }
+ *                   pm10:        { type: number, nullable: true }
+ *                   createdAt:   { type: string, format: date-time }
+ *                   updatedAt:   { type: string, format: date-time }
  */
 r.get('/', getReadings);
 
