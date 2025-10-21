@@ -15,43 +15,37 @@ const r = Router();
  * @openapi
  * /api/alerts:
  *   get:
- *     summary: "Listar alertas"
+ *     summary: Listar alertas
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: deviceId
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
+ *         description: Filtra por ID de dispositivo.
  *       - in: query
  *         name: since
- *         schema: { type: string, format: date-time }
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: ISO 8601. Incluir desde esta fecha/hora (>=).
  *       - in: query
  *         name: until
- *         schema: { type: string, format: date-time }
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: ISO 8601. Incluir hasta esta fecha/hora (<=).
  *       - in: query
  *         name: acknowledged
- *         schema: { type: string, enum: [true, false] }
+ *         schema:
+ *           type: boolean
+ *           nullable: true
+ *         description: true = solo confirmadas; false = solo no confirmadas; omitido = todas.
  *     responses:
  *       200:
  *         description: OK
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:          { type: integer }
- *                   deviceId:    { type: integer }
- *                   type:        { type: string }
- *                   message:     { type: string }
- *                   level:       { type: string, enum: [info, warning, critical] }
- *                   acknowledged:{ type: boolean, nullable: true }
- *                   acknowledgedAt: { type: string, format: date-time, nullable: true }
- *                   mutedUntil:  { type: string, format: date-time, nullable: true }
- *                   createdAt:   { type: string, format: date-time }
- *                   updatedAt:   { type: string, format: date-time }
  */
 r.get('/', authJwt, listAlerts);
 
@@ -59,7 +53,7 @@ r.get('/', authJwt, listAlerts);
  * @openapi
  * /api/alerts/{id}/ack:
  *   post:
- *     summary: "Confirmar (ack) alerta"
+ *     summary: Confirmar (ack) alerta
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
@@ -67,18 +61,11 @@ r.get('/', authJwt, listAlerts);
  *       - in: path
  *         name: id
  *         required: true
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: OK
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok: { type: boolean, example: true }
- *       404:
- *         description: Alert not found
  */
 r.post('/:id/ack', authJwt, ackAlert);
 
@@ -86,7 +73,7 @@ r.post('/:id/ack', authJwt, ackAlert);
  * @openapi
  * /api/alerts/{id}/mute:
  *   post:
- *     summary: "Silenciar alerta (por minutos o hasta fecha/hora)"
+ *     summary: Silenciar alerta (por minutos o hasta fecha/hora)
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
@@ -94,7 +81,8 @@ r.post('/:id/ack', authJwt, ackAlert);
  *       - in: path
  *         name: id
  *         required: true
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
  *     requestBody:
  *       required: false
  *       content:
@@ -102,20 +90,15 @@ r.post('/:id/ack', authJwt, ackAlert);
  *           schema:
  *             type: object
  *             properties:
- *               minutes: { type: integer, default: 60 }
- *               until:   { type: string, format: date-time }
+ *               minutes:
+ *                 type: integer
+ *                 default: 60
+ *               until:
+ *                 type: string
+ *                 format: date-time
  *     responses:
  *       200:
  *         description: OK
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok: { type: boolean, example: true }
- *                 mutedUntil: { type: string, format: date-time }
- *       404:
- *         description: Alert not found
  */
 r.post('/:id/mute', authJwt, muteAlert);
 
@@ -123,35 +106,28 @@ r.post('/:id/mute', authJwt, muteAlert);
  * @openapi
  * /api/alerts/thresholds:
  *   get:
- *     summary: "Obtener umbrales (global o por device)"
+ *     summary: Obtener umbrales (global o por device)
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: deviceId
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
- *         description: Umbrales actuales (device/global/default)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 temperature: { type: number, example: 45 }
- *                 humidity:    { type: number, example: 15 }
- *                 pm25:        { type: number, example: 100 }
- *                 pm10:        { type: number, example: 150 }
+ *         description: OK
  *   put:
- *     summary: "Guardar umbrales (upsert) global o por device"
+ *     summary: Guardar umbrales (upsert) global o por device
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: deviceId
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
  *     requestBody:
  *       required: true
  *       content:
@@ -160,19 +136,13 @@ r.post('/:id/mute', authJwt, muteAlert);
  *             type: object
  *             required: [temperature, humidity, pm25, pm10]
  *             properties:
- *               temperature: { type: number, example: 45 }
- *               humidity:    { type: number, example: 15 }
- *               pm25:        { type: number, example: 100 }
- *               pm10:        { type: number, example: 150 }
+ *               temperature: { type: number }
+ *               humidity:    { type: number }
+ *               pm25:        { type: number }
+ *               pm10:        { type: number }
  *     responses:
  *       200:
- *         description: Umbrales guardados
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok: { type: boolean, example: true }
+ *         description: OK
  */
 r.route('/thresholds')
   .get(authJwt, getThresholds)
@@ -182,32 +152,18 @@ r.route('/thresholds')
  * @openapi
  * /api/alerts/thresholds/effective:
  *   get:
- *     summary: "Ver umbral efectivo y su origen (device|global|default)"
+ *     summary: Ver umbral efectivo y su origen (device|global|default)
  *     tags: [Alerts]
  *     security:
  *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: deviceId
- *         schema: { type: integer }
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: OK
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 source:
- *                   type: string
- *                   enum: [device, global, default]
- *                 thresholds:
- *                   type: object
- *                   properties:
- *                     temperature: { type: number }
- *                     humidity:    { type: number }
- *                     pm25:        { type: number }
- *                     pm10:        { type: number }
  */
 r.get('/thresholds/effective', authJwt, getEffectiveThresholds);
 
