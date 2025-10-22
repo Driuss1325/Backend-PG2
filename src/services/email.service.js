@@ -1,7 +1,13 @@
-import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
-import { Device, User } from "../models/index.js";
+// src/services/email.service.js
+// Solo API de AWS SES v3 (sin SMTP, sin BD).
+// ENV requeridos:
+//   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION=us-east-1
+//   SENDER_EMAIL=admin@fireguard-gt.org
+//   ALERT_RECIPIENTS=skyfall1321@gmail.com
+//   (opcional) FRONTEND_URL, REPLY_TO, SES_CONFIGURATION_SET
 
-// ------------------------- Utilidades básicas -------------------------
+import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+
 const TZ = process.env.APP_TZ || "America/Guatemala";
 
 function normEmail(e) {
@@ -24,7 +30,6 @@ function formatLocalDate(d) {
   });
 }
 
-// ------------------------- Cliente SES con memo -------------------------
 let _ses = null;
 function getSes() {
   if (_ses) return _ses;
@@ -32,7 +37,7 @@ function getSes() {
   return _ses;
 }
 
-// Reintentos exponenciales para errores transitorios (throttling/unavailable/timeout)
+// Reintentos para errores transitorios (throttling/unavailable/timeout)
 async function sendEmailWithRetry(cmd, tries = 3, baseMs = 500) {
   const ses = getSes();
   let lastErr;
@@ -42,47 +47,28 @@ async function sendEmailWithRetry(cmd, tries = 3, baseMs = 500) {
     } catch (e) {
       lastErr = e;
       const msg = String(e?.name || e?.message || e);
-      // Errores transitorios típicos en SES/SDK
-      const transient =
-        /Throttl|Timeout|Service|Unavailable|Rate|TooMany|ECONNRESET|ETIMEDOUT/i.test(
-          msg
-        );
+      const transient = /Throttl|Timeout|Service|Unavailable|Rate|TooMany|ECONNRESET|ETIMEDOUT/i.test(msg);
       if (!transient || i === tries - 1) break;
       const wait = baseMs * Math.pow(2, i);
-      await new Promise((r) => setTimeout(r, wait));
+      await new Promise(r => setTimeout(r, wait));
     }
   }
   throw lastErr;
 }
 
-// ------------------------- Destinatarios -------------------------
-async function resolveRecipients(deviceId) {
-  const set = new Set();
-
-  try {
-    const dev = await Device.findByPk(deviceId, {
-      include: [{ model: User, as: "owner" }],
-    });
-    const ownerEmail = normEmail(dev?.owner?.email);
-    if (ownerEmail.includes("@")) set.add(ownerEmail);
-  } catch (e) {
-    console.warn(
-      "[email] No se pudo resolver owner del device:",
-      deviceId,
-      e?.message
-    );
-  }
-
-  (process.env.ALERT_RECIPIENTS || "")
+// === Destinatarios: EXACTAMENTE los de ALERT_RECIPIENTS ===
+function resolveRecipientsNoDB() {
+  const recipients = (process.env.ALERT_RECIPIENTS || "")
     .split(",")
     .map(normEmail)
-    .filter((s) => s.includes("@"))
-    .forEach((e) => set.add(e));
-
-  return Array.from(set);
+    .filter(e => e.includes("@"));
+  if (!recipients.length) {
+    throw new Error("ALERT_RECIPIENTS no configurado o vacío");
+  }
+  return recipients;
 }
 
-// ------------------------- Render del contenido -------------------------
+// === Render ===
 function renderAlertSubject(alert, deviceName) {
   const level = (alert.level || "info").toUpperCase();
   return `🚨 [${level}] ${alert.type} - ${deviceName}`;
@@ -100,11 +86,8 @@ function renderAlertHtmlText(alert, deviceName) {
            <th align="left">Valor</th>
          </tr>
          ${Object.entries(alert.details)
-           .slice(0, 50) // límite sano
-           .map(
-             ([k, v]) =>
-               `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`
-           )
+           .slice(0, 50)
+           .map(([k, v]) => `<tr><td>${escapeHtml(k)}</td><td>${escapeHtml(v)}</td></tr>`)
            .join("")}
        </table>`
     : "";
@@ -120,21 +103,15 @@ function renderAlertHtmlText(alert, deviceName) {
         </tr>
         <tr>
           <td style="padding:30px;">
-            <h2 style="margin:0 0 10px;color:#111;">${escapeHtml(
-              alert.type
-            )} (${(alert.level || "info").toUpperCase()})</h2>
+            <h2 style="margin:0 0 10px;color:#111;">${escapeHtml(alert.type)} (${(alert.level || "info").toUpperCase()})</h2>
             <p style="margin:0 0 15px;font-size:15px;color:#333;line-height:1.6;">
               <strong>Dispositivo:</strong> ${escapeHtml(deviceName)}<br>
               <strong>Fecha:</strong> ${escapeHtml(created)}<br>
-              <strong>Nivel:</strong> <span style="color:${levelColor};font-weight:bold;">${escapeHtml(
-    alert.level || "info"
-  )}</span>
+              <strong>Nivel:</strong> <span style="color:${levelColor};font-weight:bold;">${escapeHtml(alert.level || "info")}</span>
             </p>
 
             <div style="margin:25px 0;padding:15px 20px;border-left:5px solid ${levelColor};background-color:#f9fafb;">
-              <p style="margin:0;font-size:15px;color:#222;">${escapeHtml(
-                alert.message
-              )}</p>
+              <p style="margin:0;font-size:15px;color:#222;">${escapeHtml(alert.message)}</p>
             </div>
 
             ${detailsHtml}
@@ -167,33 +144,14 @@ Mensaje: ${alert.message ?? ""}
   return { html, text };
 }
 
-// ------------------------- Envío genérico por SES -------------------------
-export async function sendEmail({
-  from,
-  to,
-  subject,
-  html,
-  text,
-  replyTo,
-  configurationSetName,
-  tags,
-}) {
+// === Envío genérico por SES ===
+export async function sendEmail({ from, to, subject, html, text, replyTo, configurationSetName, tags }) {
   const cmd = new SendEmailCommand({
-    FromEmailAddress: from, // Debe ser identidad/correo de dominio verificado en la misma región
+    FromEmailAddress: from, // Debe ser identidad/correo verificado en la misma región
     Destination: { ToAddresses: Array.isArray(to) ? to : [to] },
-    ReplyToAddresses: replyTo
-      ? Array.isArray(replyTo)
-        ? replyTo
-        : [replyTo]
-      : undefined,
-    ConfigurationSetName:
-      configurationSetName || process.env.SES_CONFIGURATION_SET || undefined,
-    EmailTags: Array.isArray(tags)
-      ? tags.map(([Name, Value]) => ({
-          Name,
-          Value: String(Value),
-        }))
-      : undefined,
+    ReplyToAddresses: replyTo ? (Array.isArray(replyTo) ? replyTo : [replyTo]) : undefined,
+    ConfigurationSetName: configurationSetName || process.env.SES_CONFIGURATION_SET || undefined,
+    EmailTags: Array.isArray(tags) ? tags.map(([Name, Value]) => ({ Name, Value: String(Value) })) : undefined,
     Content: {
       Simple: {
         Subject: { Data: subject },
@@ -209,35 +167,26 @@ export async function sendEmail({
   return out.MessageId;
 }
 
-// ------------------------- Caso de uso: enviar alerta -------------------------
+// === Caso de uso: enviar alerta (From = SENDER_EMAIL, To = ALERT_RECIPIENTS) ===
 /**
  * Envía un correo para UNA alerta con plantilla elegante (solo SES).
- * @param {Object} alert { deviceId, type, level, message, details, createdAt }
+ * @param {Object} alert { deviceId, type, level, message, details, createdAt, deviceName? }
  */
 export async function sendAlertEmail(alert) {
-  const recipients = await resolveRecipients(alert.deviceId);
-  if (!recipients.length) {
-    console.warn("[email] Sin destinatarios para device", alert.deviceId);
-    return;
-  }
-
-  const dev = await Device.findByPk(alert.deviceId);
-  const deviceName = dev?.name
-    ? `${dev.name} (#${alert.deviceId})`
-    : `Device #${alert.deviceId}`;
-
-  const subject = renderAlertSubject(alert, deviceName);
-  const { html, text } = renderAlertHtmlText(alert, deviceName);
-
-  const from =
-    normEmail(process.env.SENDER_EMAIL) ||
-    normEmail(process.env.ALERT_SENDER) ||
-    "";
-
+  const recipients = resolveRecipientsNoDB(); // => exactamente ALERT_RECIPIENTS
+  const from = normEmail(process.env.SENDER_EMAIL);
   if (!from) {
     console.error("[email] 'SENDER_EMAIL' no configurado. Se omite envío.");
     return;
   }
+
+  const deviceName =
+    alert.deviceName && String(alert.deviceName).trim()
+      ? String(alert.deviceName).trim()
+      : `Device #${alert.deviceId}`;
+
+  const subject = renderAlertSubject(alert, deviceName);
+  const { html, text } = renderAlertHtmlText(alert, deviceName);
 
   try {
     const messageId = await sendEmail({
@@ -261,14 +210,14 @@ export async function sendAlertEmail(alert) {
   }
 }
 
-// ------------------------- Healthcheck / prueba -------------------------
+// === Healthcheck / prueba ===
 export async function sendTestEmail(to = process.env.ALERT_RECIPIENTS) {
   const recipients = (to || "")
     .split(",")
     .map(normEmail)
     .filter(Boolean);
 
-  if (!recipients.length) throw new Error("Sin destinatarios de prueba");
+  if (!recipients.length) throw new Error("ALERT_RECIPIENTS no configurado");
 
   const from = normEmail(process.env.SENDER_EMAIL);
   if (!from) throw new Error("SENDER_EMAIL no configurado");
